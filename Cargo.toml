@@ -34,6 +34,8 @@ features = [
     "wayland",
     # Windowing backend
     "winit",
+    # Native file picker via the XDG desktop portal
+    "xdg-portal",
 ]
 
 [profile.release]

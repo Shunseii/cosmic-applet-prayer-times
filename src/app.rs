@@ -47,10 +47,9 @@ pub struct PrayerApplet {
     snooze: Option<(DateTime<Utc>, Slot)>,
     /// True while a manual "test adhan" is playing from the settings page.
     testing: bool,
-    // Editable text buffers for the settings inputs.
+    // Editable text buffers for the settings coordinate inputs.
     lat_text: String,
     lon_text: String,
-    adhan_text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +71,8 @@ pub enum Message {
     SetVolume(f32),
     SetTimeFormat(usize),
     SetLanguage(usize),
-    SetAdhanPath(String),
+    PickAdhanFile,
+    AdhanFilePicked(Option<PathBuf>),
 }
 
 impl PrayerApplet {
@@ -290,6 +290,13 @@ impl PrayerApplet {
         } else {
             button::standard(s.play_test).on_press(Message::TestAdhan).into()
         };
+        let adhan_name = self
+            .config
+            .adhan_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_else(|| s.default_file.to_string());
         let adhan = adhan
             .add(settings::item(
                 s.volume,
@@ -297,8 +304,12 @@ impl PrayerApplet {
             ))
             .add(settings::item(
                 s.adhan_file,
-                text_input(s.adhan_file_placeholder, &self.adhan_text)
-                    .on_input(Message::SetAdhanPath),
+                row![
+                    text::body(adhan_name),
+                    button::standard(s.choose).on_press(Message::PickAdhanFile),
+                ]
+                .spacing(spacing.space_s)
+                .align_y(Alignment::Center),
             ))
             .add(settings::item(s.test_adhan, test_button))
             .add_maybe(
@@ -355,11 +366,6 @@ impl cosmic::Application for PrayerApplet {
             page: Page::Main,
             lat_text: format!("{}", config.latitude),
             lon_text: format!("{}", config.longitude),
-            adhan_text: config
-                .adhan_path
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default(),
             config,
             config_handle,
             audio: AudioHandle::spawn(),
@@ -487,14 +493,21 @@ impl cosmic::Application for PrayerApplet {
                 self.config.language = Language::from_index(i);
                 self.persist();
             }
-            Message::SetAdhanPath(s) => {
-                self.config.adhan_path = if s.trim().is_empty() {
-                    None
-                } else {
-                    Some(PathBuf::from(s.trim()))
-                };
-                self.adhan_text = s;
-                self.persist();
+            Message::PickAdhanFile => {
+                return cosmic::task::future(async {
+                    let dialog = cosmic::dialog::file_chooser::open::Dialog::new()
+                        .title("Select adhan audio file");
+                    match dialog.open_file().await {
+                        Ok(response) => Message::AdhanFilePicked(response.url().to_file_path().ok()),
+                        Err(_) => Message::AdhanFilePicked(None),
+                    }
+                });
+            }
+            Message::AdhanFilePicked(path) => {
+                if let Some(path) = path {
+                    self.config.adhan_path = Some(path);
+                    self.persist();
+                }
             }
             Message::TogglePopup => {
                 return if let Some(p) = self.popup.take() {
