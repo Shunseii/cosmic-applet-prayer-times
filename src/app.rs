@@ -15,7 +15,8 @@ use cosmic::{theme, Element};
 use salah::prelude::{DateTime, Duration, Utc};
 
 use crate::audio::AudioHandle;
-use crate::config::{CalcMethod, Config, MadhabPref, TimeFormat};
+use crate::config::{CalcMethod, Config, Language, MadhabPref, TimeFormat};
+use crate::i18n;
 use crate::prayer::{self, RowState, Schedule, Slot};
 
 static AUTOSIZE_ID: LazyLock<cosmic::widget::Id> =
@@ -44,6 +45,8 @@ pub struct PrayerApplet {
     playing: Option<Slot>,
     /// Pending snooze: replay `slot`'s adhan at the given instant.
     snooze: Option<(DateTime<Utc>, Slot)>,
+    /// True while a manual "test adhan" is playing from the settings page.
+    testing: bool,
     // Editable text buffers for the settings inputs.
     lat_text: String,
     lon_text: String,
@@ -57,15 +60,18 @@ pub enum Message {
     Tick,
     StopAdhan,
     Snooze,
+    TestAdhan,
     OpenSettings,
     CloseSettings,
     SetLatitude(String),
     SetLongitude(String),
+    SetLocationName(String),
     SetMethod(usize),
     SetMadhab(usize),
     ToggleAdhan(usize, bool),
     SetVolume(f32),
     SetTimeFormat(usize),
+    SetLanguage(usize),
     SetAdhanPath(String),
 }
 
@@ -107,48 +113,53 @@ impl PrayerApplet {
         }
     }
 
-    /// Compact panel label, e.g. "Asr 1:23" or "Maghrib 18m".
+    /// Compact panel label, e.g. "Asr 1h 23m" or "Maghrib adhan".
     fn panel_label(&self) -> String {
+        let lang = self.config.language;
         if let Some(slot) = self.playing {
-            return format!("{} adhan", slot.name());
+            return format!(
+                "{} {}",
+                slot.name_localized(lang),
+                i18n::strings(lang).playing_label
+            );
         }
         let Some(schedule) = self.schedule.as_ref() else {
             return "Prayer times".to_string();
         };
-        let status = schedule.status(self.now);
+        let status = schedule.status(self.now, lang);
         format!(
             "{} {}",
             status.next_label,
-            prayer::format_countdown(status.countdown)
+            prayer::format_countdown(status.countdown, lang)
         )
     }
 
     fn main_view(&self) -> Element<'_, Message> {
         let spacing = theme::active().cosmic().spacing;
+        let lang = self.config.language;
+        let s = i18n::strings(lang);
 
         let Some(schedule) = self.schedule.as_ref() else {
-            return container(text::body("Prayer times unavailable"))
-                .padding(16)
-                .into();
+            return container(text::body(s.unavailable)).padding(16).into();
         };
 
-        let status = schedule.status(self.now);
+        let status = schedule.status(self.now, lang);
         let pattern = self.config.time_format_pattern();
 
         let header = column![
-            text::body(location_label(&self.config)),
-            text::title4(prayer::hijri_date_string()),
+            text::body(self.config.location_name.clone()),
+            text::title4(prayer::hijri_date_string(lang)),
         ]
         .spacing(2);
 
         let hero_inner = column![
-            text::caption("CURRENT PRAYER").class(cosmic::theme::Text::Accent),
+            text::caption(s.current_prayer).class(cosmic::theme::Text::Accent),
             row_between(
                 text::title3(status.current_label.clone()).into(),
                 column![
-                    text::title2(prayer::format_countdown(status.countdown))
+                    text::title2(prayer::format_countdown(status.countdown, lang))
                         .class(cosmic::theme::Text::Accent),
-                    text::caption("time left"),
+                    text::caption(s.time_left),
                 ]
                 .align_x(Alignment::End)
                 .into(),
@@ -156,13 +167,17 @@ impl PrayerApplet {
             divider::horizontal::default(),
             row_between(
                 row![
-                    text::caption("NEXT"),
+                    text::caption(s.next),
                     text::body(status.next_label.clone()),
                 ]
                 .spacing(spacing.space_xs)
                 .align_y(Alignment::Center)
                 .into(),
-                text::body(schedule.next_time_string(&status, pattern)).into(),
+                text::body(i18n::localize_time(
+                    &schedule.next_time_string(&status, pattern),
+                    lang
+                ))
+                .into(),
             ),
         ]
         .spacing(spacing.space_xs);
@@ -175,8 +190,13 @@ impl PrayerApplet {
         let mut list = column![].spacing(spacing.space_xxs);
         for slot in Slot::ALL {
             let state = schedule.row_state(slot, &status, self.now);
-            let time_str = schedule.local_time_string(slot, pattern);
-            list = list.push(prayer_row(slot.name(), &time_str, state, spacing.space_xs));
+            let time_str = i18n::localize_time(&schedule.local_time_string(slot, pattern), lang);
+            list = list.push(prayer_row(
+                slot.name_localized(lang),
+                &time_str,
+                state,
+                spacing.space_xs,
+            ));
         }
 
         let gear = button::icon(icon::from_name("emblem-system-symbolic"))
@@ -184,8 +204,8 @@ impl PrayerApplet {
 
         let footer_right: Element<'_, Message> = if self.playing.is_some() {
             row![
-                button::destructive("Stop").on_press(Message::StopAdhan),
-                button::standard("Snooze 5m").on_press(Message::Snooze),
+                button::destructive(s.stop).on_press(Message::StopAdhan),
+                button::standard(s.snooze).on_press(Message::Snooze),
             ]
             .spacing(spacing.space_xs)
             .into()
@@ -214,11 +234,13 @@ impl PrayerApplet {
 
     fn settings_view(&self) -> Element<'_, Message> {
         let spacing = theme::active().cosmic().spacing;
+        let lang = self.config.language;
+        let s = i18n::strings(lang);
 
         let header = row![
             button::icon(icon::from_name("go-previous-symbolic"))
                 .on_press(Message::CloseSettings),
-            text::title4("Settings"),
+            text::title4(s.settings),
         ]
         .spacing(spacing.space_s)
         .align_y(Alignment::Center);
@@ -226,53 +248,76 @@ impl PrayerApplet {
         let method_opts: Vec<&str> = CalcMethod::ALL.iter().map(|m| m.label()).collect();
         let madhab_opts: Vec<&str> = MadhabPref::ALL.iter().map(|m| m.label()).collect();
         let time_opts: Vec<&str> = TimeFormat::ALL.iter().map(|t| t.label()).collect();
+        let lang_opts: Vec<&str> = Language::ALL.iter().map(|l| l.label()).collect();
 
-        let location = settings::section().title("Location").add(
-            settings::item(
-                "Latitude",
+        let location = settings::section()
+            .title(s.location)
+            .add(settings::item(
+                s.location_name,
+                text_input("", &self.config.location_name).on_input(Message::SetLocationName),
+            ))
+            .add(settings::item(
+                s.latitude,
                 text_input("", &self.lat_text).on_input(Message::SetLatitude),
-            ),
-        );
-        let location = location.add(settings::item(
-            "Longitude",
-            text_input("", &self.lon_text).on_input(Message::SetLongitude),
-        ));
+            ))
+            .add(settings::item(
+                s.longitude,
+                text_input("", &self.lon_text).on_input(Message::SetLongitude),
+            ));
 
         let calculation = settings::section()
-            .title("Calculation")
+            .title(s.calculation)
             .add(settings::item(
-                "Method",
+                s.method,
                 dropdown(method_opts, Some(self.config.method.index()), Message::SetMethod),
             ))
             .add(settings::item(
-                "Madhab",
+                s.madhab,
                 dropdown(madhab_opts, Some(self.config.madhab.index()), Message::SetMadhab),
             ));
 
-        let mut adhan = settings::section().title("Adhan");
+        let mut adhan = settings::section().title(s.adhan);
         for slot in Slot::ALL {
             let i = slot.index();
             let enabled = self.config.adhan_enabled[i];
             adhan = adhan.add(settings::item(
-                slot.name(),
+                slot.name_localized(lang),
                 toggler(enabled).on_toggle(move |b| Message::ToggleAdhan(i, b)),
             ));
         }
+        let test_button: Element<'_, Message> = if self.testing {
+            button::destructive(s.stop).on_press(Message::StopAdhan).into()
+        } else {
+            button::standard(s.play_test).on_press(Message::TestAdhan).into()
+        };
         let adhan = adhan
             .add(settings::item(
-                "Volume",
+                s.volume,
                 slider(0.0..=1.0, self.config.volume, Message::SetVolume).step(0.05f32),
             ))
             .add(settings::item(
-                "Adhan file",
-                text_input("path to audio file", &self.adhan_text)
+                s.adhan_file,
+                text_input(s.adhan_file_placeholder, &self.adhan_text)
                     .on_input(Message::SetAdhanPath),
-            ));
+            ))
+            .add(settings::item(s.test_adhan, test_button))
+            .add_maybe(
+                self.config
+                    .resolved_adhan_path()
+                    .is_none()
+                    .then(|| settings::item("", text::caption(s.no_audio_file))),
+            );
 
-        let display = settings::section().title("Display").add(settings::item(
-            "Time format",
-            dropdown(time_opts, Some(self.config.time_format.index()), Message::SetTimeFormat),
-        ));
+        let display = settings::section()
+            .title(s.display)
+            .add(settings::item(
+                s.time_format,
+                dropdown(time_opts, Some(self.config.time_format.index()), Message::SetTimeFormat),
+            ))
+            .add(settings::item(
+                s.language,
+                dropdown(lang_opts, Some(self.config.language.index()), Message::SetLanguage),
+            ));
 
         column![header, location, calculation, adhan, display]
             .spacing(spacing.space_m)
@@ -323,6 +368,7 @@ impl cosmic::Application for PrayerApplet {
             last_tick: now,
             playing: None,
             snooze: None,
+            testing: false,
         };
         app.recompute();
         (app, Task::none())
@@ -373,12 +419,21 @@ impl cosmic::Application for PrayerApplet {
             Message::StopAdhan => {
                 self.playing = None;
                 self.snooze = None;
+                self.testing = false;
                 self.audio.stop();
             }
             Message::Snooze => {
                 self.audio.stop();
                 if let Some(slot) = self.playing.take() {
                     self.snooze = Some((self.now + SNOOZE, slot));
+                }
+            }
+            Message::TestAdhan => {
+                if let Some(path) = self.config.resolved_adhan_path() {
+                    self.audio.play(path, self.config.volume);
+                    self.testing = true;
+                } else {
+                    tracing::warn!("test adhan requested but no audio file is configured");
                 }
             }
             Message::OpenSettings => self.page = Page::Settings,
@@ -398,6 +453,10 @@ impl cosmic::Application for PrayerApplet {
                     self.persist();
                 }
                 self.lon_text = s;
+            }
+            Message::SetLocationName(s) => {
+                self.config.location_name = s;
+                self.persist();
             }
             Message::SetMethod(i) => {
                 self.config.method = CalcMethod::from_index(i);
@@ -422,6 +481,10 @@ impl cosmic::Application for PrayerApplet {
             }
             Message::SetTimeFormat(i) => {
                 self.config.time_format = TimeFormat::from_index(i);
+                self.persist();
+            }
+            Message::SetLanguage(i) => {
+                self.config.language = Language::from_index(i);
                 self.persist();
             }
             Message::SetAdhanPath(s) => {
@@ -533,9 +596,4 @@ fn prayer_row<'a>(name: &'a str, time: &str, state: RowState, gap: u16) -> Eleme
     .width(Length::Fill)
     .padding([4, 4])
     .into()
-}
-
-fn location_label(_config: &Config) -> String {
-    // MVP: hardcoded location label matching the default coordinates.
-    "Toronto, Canada".to_string()
 }

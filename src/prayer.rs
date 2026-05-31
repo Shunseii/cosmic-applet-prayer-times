@@ -26,7 +26,8 @@ const HIJRI_MONTHS_EN: [&str; 12] = [
     "Dhuʾl-Hijjah",
 ];
 
-use crate::config::Config;
+use crate::config::{Config, Language};
+use crate::i18n;
 
 /// The five obligatory daily prayers, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +65,19 @@ impl Slot {
             Slot::Asr => "Asr",
             Slot::Maghrib => "Maghrib",
             Slot::Isha => "Isha",
+        }
+    }
+
+    pub fn name_localized(self, lang: Language) -> &'static str {
+        match lang {
+            Language::English => self.name(),
+            Language::Arabic => match self {
+                Slot::Fajr => "الفجر",
+                Slot::Dhuhr => "الظهر",
+                Slot::Asr => "العصر",
+                Slot::Maghrib => "المغرب",
+                Slot::Isha => "العشاء",
+            },
         }
     }
 
@@ -133,7 +147,7 @@ impl Schedule {
     }
 
     /// Determine current/next prayer and the countdown to next, relative to `now`.
-    pub fn status(&self, now: DateTime<Utc>) -> Status {
+    pub fn status(&self, now: DateTime<Utc>, lang: Language) -> Status {
         // First prayer today strictly after `now`.
         let next_idx = (0..5).find(|&i| self.times[i] > now);
 
@@ -141,14 +155,14 @@ impl Schedule {
             Some(i) => {
                 let current_index = if i == 0 { None } else { Some(i - 1) };
                 let current_label = match current_index {
-                    Some(c) => Slot::ALL[c].name().to_string(),
+                    Some(c) => Slot::ALL[c].name_localized(lang).to_string(),
                     // Before Fajr: the active period is last night's Isha.
-                    None => Slot::Isha.name().to_string(),
+                    None => Slot::Isha.name_localized(lang).to_string(),
                 };
                 Status {
                     current_label,
                     current_index,
-                    next_label: Slot::ALL[i].name().to_string(),
+                    next_label: Slot::ALL[i].name_localized(lang).to_string(),
                     next_index: Some(i),
                     next_time: self.times[i],
                     countdown: self.times[i].signed_duration_since(now),
@@ -156,9 +170,9 @@ impl Schedule {
             }
             // After Isha: next is tomorrow's Fajr; Isha is the active prayer.
             None => Status {
-                current_label: Slot::Isha.name().to_string(),
+                current_label: Slot::Isha.name_localized(lang).to_string(),
                 current_index: Some(Slot::Isha.index()),
-                next_label: Slot::Fajr.name().to_string(),
+                next_label: Slot::Fajr.name_localized(lang).to_string(),
                 next_index: None,
                 next_time: self.fajr_tomorrow,
                 countdown: self.fajr_tomorrow.signed_duration_since(now),
@@ -197,18 +211,24 @@ impl Schedule {
 }
 
 /// Format a positive duration as `Xh XXm` (e.g. "1h 23m"), `XXm` under an hour,
-/// or "<1m" under a minute.
-pub fn format_countdown(d: Duration) -> String {
+/// or "<1m" under a minute. Localizes units and digits for Arabic.
+pub fn format_countdown(d: Duration, lang: Language) -> String {
     let total = d.num_seconds().max(0);
     let h = total / 3600;
     let m = (total % 3600) / 60;
-    if h > 0 {
-        format!("{h}h {m:02}m")
+    let (hu, mu) = if lang.is_rtl() { ("س", "د") } else { ("h", "m") };
+    let s = if h > 0 {
+        format!("{h}{hu} {m:02}{mu}")
     } else if m > 0 {
-        format!("{m}m")
+        format!("{m}{mu}")
     } else {
-        "<1m".to_string()
-    }
+        return if lang.is_rtl() {
+            "< ١د".to_string()
+        } else {
+            "<1m".to_string()
+        };
+    };
+    i18n::digits(&s, lang)
 }
 
 /// Today's date in the local timezone.
@@ -221,19 +241,29 @@ pub fn now_utc() -> DateTime<Utc> {
     Utc::now()
 }
 
-/// Hijri (Umm al-Qura) date for the popup header, e.g.
-/// "Saturday, 14 Dhuʾl-Qaʿdah 1447 AH". Falls back to the Gregorian date if the
-/// conversion fails (the Umm al-Qura table is bounded to ~1937–2077).
-pub fn hijri_date_string() -> String {
+/// Hijri (Umm al-Qura) date for the popup header, localized. English, e.g.
+/// "Saturday, 14 Dhuʾl-Qaʿdah 1447 AH"; Arabic, e.g. "السبت، ١٤ ذو القعدة ١٤٤٧ هـ".
+/// Falls back to the Gregorian date if the conversion fails (the Umm al-Qura
+/// table is bounded to ~1937–2077).
+pub fn hijri_date_string(lang: Language) -> String {
     let now = Local::now();
     match HijriDate::from_gr(now.year() as usize, now.month() as usize, now.day() as usize) {
-        Ok(h) => {
-            let month = HIJRI_MONTHS_EN
-                .get(h.month().saturating_sub(1))
-                .copied()
-                .unwrap_or("");
-            format!("{}, {} {} {} AH", h.day_name_en(), h.day(), month, h.year())
-        }
+        Ok(h) => match lang {
+            Language::English => {
+                let month = HIJRI_MONTHS_EN
+                    .get(h.month().saturating_sub(1))
+                    .copied()
+                    .unwrap_or("");
+                format!("{}, {} {} {} AH", h.day_name_en(), h.day(), month, h.year())
+            }
+            Language::Arabic => format!(
+                "{}، {} {} {} هـ",
+                h.day_name(),
+                i18n::digits(&h.day().to_string(), lang),
+                h.month_name(),
+                i18n::digits(&h.year().to_string(), lang),
+            ),
+        },
         Err(_) => now.format("%A, %-d %B").to_string(),
     }
 }

@@ -153,17 +153,49 @@ impl TimeFormat {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Language {
+    English,
+    Arabic,
+}
+
+impl Language {
+    pub const ALL: [Language; 2] = [Language::English, Language::Arabic];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Language::English => "English",
+            Language::Arabic => "العربية",
+        }
+    }
+
+    pub fn is_rtl(self) -> bool {
+        matches!(self, Language::Arabic)
+    }
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|m| *m == self).unwrap_or(0)
+    }
+
+    pub fn from_index(i: usize) -> Self {
+        Self::ALL.get(i).copied().unwrap_or(Language::English)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, CosmicConfigEntry)]
 #[version = 1]
 pub struct Config {
     pub latitude: f64,
     pub longitude: f64,
+    /// Display name for the configured location (shown in the popup header).
+    pub location_name: String,
     pub method: CalcMethod,
     pub madhab: MadhabPref,
     /// Per-prayer adhan enable, ordered Fajr, Dhuhr, Asr, Maghrib, Isha.
     pub adhan_enabled: [bool; 5],
     pub volume: f32,
     pub time_format: TimeFormat,
+    pub language: Language,
     /// Custom adhan audio file. `None` falls back to a default-path lookup.
     pub adhan_path: Option<PathBuf>,
 }
@@ -175,11 +207,13 @@ impl Default for Config {
         Self {
             latitude: 43.6532,
             longitude: -79.3832,
+            location_name: "Toronto, Canada".to_string(),
             method: CalcMethod::NorthAmerica,
             madhab: MadhabPref::Shafi,
             adhan_enabled: [true; 5],
             volume: 0.8,
             time_format: TimeFormat::Twelve,
+            language: Language::English,
             adhan_path: default_adhan_path(),
         }
     }

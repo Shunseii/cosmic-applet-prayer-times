@@ -28,18 +28,25 @@ sudo apt install -y build-essential pkg-config \
 ## Build & run
 
 ```sh
-just build-release      # or: cargo build --release
-just run                # run for testing
+make build              # or: cargo build --release
+make run                # run for testing (or: just run)
 ```
 
 ## Install (registers the applet with COSMIC)
 
 ```sh
-sudo just install
+cd ~/Projects/cosmic-applet-prayer-times
+make build && sudo make install     # or: sudo ~/.cargo/bin/just install
 ```
 
-Then add it via **Settings → Desktop → Panel → Configure panel applets**, or
-restart the panel.
+`make install` copies the already-built release binary, so build as your user
+first (it won't recompile as root). Defaults to `PREFIX=/usr`; override with
+`sudo make install PREFIX=/usr/local`.
+
+Then add it via **Settings → Desktop → Panel → Configure panel applets** (log
+out/in or restart the panel if it doesn't appear immediately).
+
+Uninstall with `sudo make uninstall`.
 
 ## Adhan audio
 
