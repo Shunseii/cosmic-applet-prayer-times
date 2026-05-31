@@ -297,12 +297,10 @@ impl PrayerApplet {
             .unwrap_or_else(|| s.default_file.to_string());
         let choose = button::icon(icon::from_name("folder-open-symbolic"))
             .on_press(Message::PickAdhanFile);
-        let file_control: Element<'_, Message> = if rtl {
-            row![choose, text::body(adhan_name)].spacing(g).align_y(Alignment::Center).into()
-        } else {
-            row![text::body(adhan_name), choose].spacing(g).align_y(Alignment::Center).into()
-        };
-        adhan_items.push(item(rtl, g, s.adhan_file, file_control));
+        adhan_items.push(item(rtl, g, s.adhan_file, choose.into()));
+        // The filename gets its own wrapping line so a long name can't push the
+        // picker icon off the edge of the popup.
+        adhan_items.push(text::caption(adhan_name).width(Length::Fill).into());
         let test_button: Element<'_, Message> = if self.testing {
             button::destructive(s.stop).on_press(Message::StopAdhan).into()
         } else {
