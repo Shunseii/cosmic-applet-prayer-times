@@ -1,0 +1,5 @@
+/target
+/vendor
+/vendor.tar
+/.cargo/config.toml
+assets/adhan.ogg

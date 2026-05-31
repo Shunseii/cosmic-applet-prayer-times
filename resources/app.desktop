@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=Prayer Times
+Comment=Islamic prayer times and adhan in the COSMIC panel
+Type=Application
+Icon=io.github.shunseii.CosmicAppletPrayerTimes
+Exec=cosmic-applet-prayer-times
+Terminal=false
+StartupNotify=true
+Categories=COSMIC;Utility;
+Keywords=COSMIC;Applet;Prayer;Adhan;Salah;Islam;
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto
+MimeType=

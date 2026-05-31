@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>io.github.shunseii.CosmicAppletPrayerTimes</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Prayer Times</name>
+  <summary>Islamic prayer times and adhan in the COSMIC panel</summary>
+  <description>
+    <p>
+      A COSMIC panel applet that shows the five daily Islamic prayer times,
+      highlights the current prayer with a live countdown to the next, and
+      plays the adhan at prayer time.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/Shunseii/cosmic-applet-prayer-times</url>
+</component>
