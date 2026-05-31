@@ -9,7 +9,8 @@ use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup};
 use cosmic::iced::widget::{column, row};
 use cosmic::iced::{window::Id, Alignment, Length, Limits, Subscription};
-use cosmic::widget::{button, container, divider, dropdown, icon, settings, slider, space, text, text_input, toggler};
+use cosmic::cosmic_theme::Spacing;
+use cosmic::widget::{button, container, divider, dropdown, icon, slider, space, text, text_input, toggler};
 use cosmic::{theme, Element};
 
 use salah::prelude::{DateTime, Duration, Utc};
@@ -137,7 +138,9 @@ impl PrayerApplet {
     fn main_view(&self) -> Element<'_, Message> {
         let spacing = theme::active().cosmic().spacing;
         let lang = self.config.language;
+        let rtl = lang.is_rtl();
         let s = i18n::strings(lang);
+        let align = if rtl { Alignment::End } else { Alignment::Start };
 
         let Some(schedule) = self.schedule.as_ref() else {
             return container(text::body(s.unavailable)).padding(16).into();
@@ -150,37 +153,32 @@ impl PrayerApplet {
             text::body(self.config.location_name.clone()),
             text::title4(prayer::hijri_date_string(lang)),
         ]
-        .spacing(2);
+        .spacing(2)
+        .width(Length::Fill)
+        .align_x(align);
+
+        let countdown_col = column![
+            text::title2(prayer::format_countdown(status.countdown, lang))
+                .class(cosmic::theme::Text::Accent),
+            text::caption(s.time_left),
+        ]
+        .align_x(if rtl { Alignment::Start } else { Alignment::End });
+
+        let next_group = pair(rtl, text::caption(s.next).into(), text::body(status.next_label.clone()).into(), spacing.space_xs);
+        let next_time = text::body(i18n::localize_time(
+            &schedule.next_time_string(&status, pattern),
+            lang,
+        ));
 
         let hero_inner = column![
             text::caption(s.current_prayer).class(cosmic::theme::Text::Accent),
-            row_between(
-                text::title3(status.current_label.clone()).into(),
-                column![
-                    text::title2(prayer::format_countdown(status.countdown, lang))
-                        .class(cosmic::theme::Text::Accent),
-                    text::caption(s.time_left),
-                ]
-                .align_x(Alignment::End)
-                .into(),
-            ),
+            ends(rtl, text::title3(status.current_label.clone()).into(), countdown_col.into()),
             divider::horizontal::default(),
-            row_between(
-                row![
-                    text::caption(s.next),
-                    text::body(status.next_label.clone()),
-                ]
-                .spacing(spacing.space_xs)
-                .align_y(Alignment::Center)
-                .into(),
-                text::body(i18n::localize_time(
-                    &schedule.next_time_string(&status, pattern),
-                    lang
-                ))
-                .into(),
-            ),
+            ends(rtl, next_group, next_time.into()),
         ]
-        .spacing(spacing.space_xs);
+        .spacing(spacing.space_xs)
+        .width(Length::Fill)
+        .align_x(align);
 
         let hero = container(hero_inner)
             .padding(spacing.space_s)
@@ -192,6 +190,7 @@ impl PrayerApplet {
             let state = schedule.row_state(slot, &status, self.now);
             let time_str = i18n::localize_time(&schedule.local_time_string(slot, pattern), lang);
             list = list.push(prayer_row(
+                rtl,
                 slot.name_localized(lang),
                 &time_str,
                 state,
@@ -212,12 +211,12 @@ impl PrayerApplet {
         } else {
             text::caption(format!(
                 "{} · {}",
-                self.config.method.label(),
-                self.config.madhab.label()
+                self.config.method.label_localized(lang),
+                self.config.madhab.label_localized(lang)
             ))
             .into()
         };
-        let footer = row_between(gear.into(), footer_right);
+        let footer = ends(rtl, gear.into(), footer_right);
 
         column![
             header,
@@ -235,61 +234,56 @@ impl PrayerApplet {
     fn settings_view(&self) -> Element<'_, Message> {
         let spacing = theme::active().cosmic().spacing;
         let lang = self.config.language;
+        let rtl = lang.is_rtl();
         let s = i18n::strings(lang);
+        let g = spacing.space_s;
 
-        let header = row![
-            button::icon(icon::from_name("go-previous-symbolic"))
-                .on_press(Message::CloseSettings),
-            text::title4(s.settings),
-        ]
-        .spacing(spacing.space_s)
-        .align_y(Alignment::Center);
+        let back_icon = if rtl { "go-next-symbolic" } else { "go-previous-symbolic" };
+        let back = button::icon(icon::from_name(back_icon)).on_press(Message::CloseSettings);
+        let title = text::title4(s.settings);
+        let header: Element<'_, Message> = if rtl {
+            row![space::horizontal().width(Length::Fill), title, back]
+                .spacing(g)
+                .align_y(Alignment::Center)
+                .width(Length::Fill)
+                .into()
+        } else {
+            row![back, title].spacing(g).align_y(Alignment::Center).into()
+        };
 
-        let method_opts: Vec<&str> = CalcMethod::ALL.iter().map(|m| m.label()).collect();
-        let madhab_opts: Vec<&str> = MadhabPref::ALL.iter().map(|m| m.label()).collect();
-        let time_opts: Vec<&str> = TimeFormat::ALL.iter().map(|t| t.label()).collect();
+        let method_opts: Vec<&str> = CalcMethod::ALL.iter().map(|m| m.label_localized(lang)).collect();
+        let madhab_opts: Vec<&str> = MadhabPref::ALL.iter().map(|m| m.label_localized(lang)).collect();
+        let time_opts: Vec<&str> = TimeFormat::ALL.iter().map(|t| t.label_localized(lang)).collect();
         let lang_opts: Vec<&str> = Language::ALL.iter().map(|l| l.label()).collect();
 
-        let location = settings::section()
-            .title(s.location)
-            .add(settings::item(
-                s.location_name,
-                text_input("", &self.config.location_name).on_input(Message::SetLocationName),
-            ))
-            .add(settings::item(
-                s.latitude,
-                text_input("", &self.lat_text).on_input(Message::SetLatitude),
-            ))
-            .add(settings::item(
-                s.longitude,
-                text_input("", &self.lon_text).on_input(Message::SetLongitude),
-            ));
+        let location = section(rtl, spacing, s.location, vec![
+            item(rtl, g, s.location_name, text_input("", &self.config.location_name).on_input(Message::SetLocationName).into()),
+            item(rtl, g, s.latitude, text_input("", &self.lat_text).on_input(Message::SetLatitude).into()),
+            item(rtl, g, s.longitude, text_input("", &self.lon_text).on_input(Message::SetLongitude).into()),
+        ]);
 
-        let calculation = settings::section()
-            .title(s.calculation)
-            .add(settings::item(
-                s.method,
-                dropdown(method_opts, Some(self.config.method.index()), Message::SetMethod),
-            ))
-            .add(settings::item(
-                s.madhab,
-                dropdown(madhab_opts, Some(self.config.madhab.index()), Message::SetMadhab),
-            ));
+        let calculation = section(rtl, spacing, s.calculation, vec![
+            item(rtl, g, s.method, dropdown(method_opts, Some(self.config.method.index()), Message::SetMethod).into()),
+            item(rtl, g, s.madhab, dropdown(madhab_opts, Some(self.config.madhab.index()), Message::SetMadhab).into()),
+        ]);
 
-        let mut adhan = settings::section().title(s.adhan);
+        let mut adhan_items: Vec<Element<'_, Message>> = Vec::new();
         for slot in Slot::ALL {
             let i = slot.index();
             let enabled = self.config.adhan_enabled[i];
-            adhan = adhan.add(settings::item(
+            adhan_items.push(item(
+                rtl,
+                g,
                 slot.name_localized(lang),
-                toggler(enabled).on_toggle(move |b| Message::ToggleAdhan(i, b)),
+                toggler(enabled).on_toggle(move |b| Message::ToggleAdhan(i, b)).into(),
             ));
         }
-        let test_button: Element<'_, Message> = if self.testing {
-            button::destructive(s.stop).on_press(Message::StopAdhan).into()
-        } else {
-            button::standard(s.play_test).on_press(Message::TestAdhan).into()
-        };
+        adhan_items.push(item(
+            rtl,
+            g,
+            s.volume,
+            slider(0.0..=1.0, self.config.volume, Message::SetVolume).step(0.05f32).into(),
+        ));
         let adhan_name = self
             .config
             .adhan_path
@@ -297,38 +291,28 @@ impl PrayerApplet {
             .and_then(|p| p.file_name())
             .map(|f| f.to_string_lossy().into_owned())
             .unwrap_or_else(|| s.default_file.to_string());
-        let adhan = adhan
-            .add(settings::item(
-                s.volume,
-                slider(0.0..=1.0, self.config.volume, Message::SetVolume).step(0.05f32),
-            ))
-            .add(settings::item(
-                s.adhan_file,
-                row![
-                    text::body(adhan_name),
-                    button::standard(s.choose).on_press(Message::PickAdhanFile),
-                ]
-                .spacing(spacing.space_s)
-                .align_y(Alignment::Center),
-            ))
-            .add(settings::item(s.test_adhan, test_button))
-            .add_maybe(
-                self.config
-                    .resolved_adhan_path()
-                    .is_none()
-                    .then(|| settings::item("", text::caption(s.no_audio_file))),
-            );
+        let choose = button::standard(s.choose).on_press(Message::PickAdhanFile);
+        let file_control: Element<'_, Message> = if rtl {
+            row![choose, text::body(adhan_name)].spacing(g).align_y(Alignment::Center).into()
+        } else {
+            row![text::body(adhan_name), choose].spacing(g).align_y(Alignment::Center).into()
+        };
+        adhan_items.push(item(rtl, g, s.adhan_file, file_control));
+        let test_button: Element<'_, Message> = if self.testing {
+            button::destructive(s.stop).on_press(Message::StopAdhan).into()
+        } else {
+            button::standard(s.play_test).on_press(Message::TestAdhan).into()
+        };
+        adhan_items.push(item(rtl, g, s.test_adhan, test_button));
+        if self.config.resolved_adhan_path().is_none() {
+            adhan_items.push(text::caption(s.no_audio_file).into());
+        }
+        let adhan = section(rtl, spacing, s.adhan, adhan_items);
 
-        let display = settings::section()
-            .title(s.display)
-            .add(settings::item(
-                s.time_format,
-                dropdown(time_opts, Some(self.config.time_format.index()), Message::SetTimeFormat),
-            ))
-            .add(settings::item(
-                s.language,
-                dropdown(lang_opts, Some(self.config.language.index()), Message::SetLanguage),
-            ));
+        let display = section(rtl, spacing, s.display, vec![
+            item(rtl, g, s.time_format, dropdown(time_opts, Some(self.config.time_format.index()), Message::SetTimeFormat).into()),
+            item(rtl, g, s.language, dropdown(lang_opts, Some(self.config.language.index()), Message::SetLanguage).into()),
+        ]);
 
         column![header, location, calculation, adhan, display]
             .spacing(spacing.space_m)
@@ -566,47 +550,119 @@ impl cosmic::Application for PrayerApplet {
     }
 }
 
-/// A `left ......... right` row that fills the available width.
-fn row_between<'a>(left: Element<'a, Message>, right: Element<'a, Message>) -> Element<'a, Message> {
-    row![left, space::horizontal().width(Length::Fill), right]
+/// Place `leading` on the start edge and `trailing` on the end edge, filling the
+/// width. Mirrors for RTL so `leading` ends up on the right.
+fn ends<'a>(
+    rtl: bool,
+    leading: Element<'a, Message>,
+    trailing: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let (a, b) = if rtl {
+        (trailing, leading)
+    } else {
+        (leading, trailing)
+    };
+    row![a, space::horizontal().width(Length::Fill), b]
         .align_y(Alignment::Center)
         .width(Length::Fill)
         .into()
 }
 
-fn prayer_row<'a>(name: &'a str, time: &str, state: RowState, gap: u16) -> Element<'a, Message> {
-    let (name_widget, time_widget) = match state {
-        RowState::Current => (
-            text::body(name).class(cosmic::theme::Text::Accent),
-            text::body(time.to_string()).class(cosmic::theme::Text::Accent),
-        ),
-        RowState::Next => (
-            text::body(name).class(cosmic::theme::Text::Accent),
-            text::body(time.to_string()),
-        ),
-        RowState::Passed | RowState::Upcoming => {
-            (text::body(name), text::body(time.to_string()))
-        }
+/// A tight `leading trailing` pair, mirrored for RTL.
+fn pair<'a>(
+    rtl: bool,
+    leading: Element<'a, Message>,
+    trailing: Element<'a, Message>,
+    gap: u16,
+) -> Element<'a, Message> {
+    let (a, b) = if rtl {
+        (trailing, leading)
+    } else {
+        (leading, trailing)
     };
+    row![a, b].spacing(gap).align_y(Alignment::Center).into()
+}
 
-    let marker = match state {
-        RowState::Current | RowState::Next => "•  ",
-        _ => "    ",
+/// A settings row: label on the leading edge, control on the trailing edge.
+fn item<'a>(
+    rtl: bool,
+    gap: u16,
+    label: &'a str,
+    control: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let label_el: Element<'a, Message> = text::body(label).into();
+    let (a, b) = if rtl {
+        (control, label_el)
+    } else {
+        (label_el, control)
     };
+    row![a, space::horizontal().width(Length::Fill), b]
+        .spacing(gap)
+        .align_y(Alignment::Center)
+        .width(Length::Fill)
+        .into()
+}
 
-    row![
-        text::body(marker).class(if matches!(state, RowState::Current | RowState::Next) {
+/// A titled settings card containing the given item rows.
+fn section<'a>(
+    rtl: bool,
+    spacing: Spacing,
+    title: &'a str,
+    items: Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let align = if rtl { Alignment::End } else { Alignment::Start };
+    let mut col = column![text::caption(title).class(cosmic::theme::Text::Accent)]
+        .spacing(spacing.space_xs)
+        .width(Length::Fill)
+        .align_x(align);
+    for it in items {
+        col = col.push(it);
+    }
+    container(col)
+        .padding(spacing.space_s)
+        .width(Length::Fill)
+        .class(cosmic::theme::Container::Card)
+        .into()
+}
+
+fn prayer_row<'a>(
+    rtl: bool,
+    name: &'a str,
+    time: &str,
+    state: RowState,
+    gap: u16,
+) -> Element<'a, Message> {
+    let accent = matches!(state, RowState::Current | RowState::Next);
+    let name_el: Element<'a, Message> = if accent {
+        text::body(name).class(cosmic::theme::Text::Accent).into()
+    } else {
+        text::body(name).into()
+    };
+    let time_el: Element<'a, Message> = if matches!(state, RowState::Current) {
+        text::body(time.to_string())
+            .class(cosmic::theme::Text::Accent)
+            .into()
+    } else {
+        text::body(time.to_string()).into()
+    };
+    let marker_el: Element<'a, Message> = text::body(if accent { "•  " } else { "    " })
+        .class(if accent {
             cosmic::theme::Text::Accent
         } else {
             cosmic::theme::Text::Default
-        }),
-        name_widget,
-        space::horizontal().width(Length::Fill),
-        time_widget,
-    ]
-    .spacing(gap)
-    .align_y(Alignment::Center)
-    .width(Length::Fill)
-    .padding([4, 4])
-    .into()
+        })
+        .into();
+
+    let name_group = pair(rtl, marker_el, name_el, 0);
+    let (a, b) = if rtl {
+        (time_el, name_group)
+    } else {
+        (name_group, time_el)
+    };
+    row![a, space::horizontal().width(Length::Fill), b]
+        .spacing(gap)
+        .align_y(Alignment::Center)
+        .width(Length::Fill)
+        .padding([4, 4])
+        .into()
 }

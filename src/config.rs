@@ -62,6 +62,27 @@ impl CalcMethod {
         }
     }
 
+    pub fn label_localized(self, lang: Language) -> &'static str {
+        match lang {
+            Language::English => self.label(),
+            Language::Arabic => match self {
+                CalcMethod::MuslimWorldLeague => "رابطة العالم الإسلامي",
+                CalcMethod::Egyptian => "الهيئة المصرية العامة",
+                CalcMethod::Karachi => "كراتشي",
+                CalcMethod::UmmAlQura => "أم القرى (مكة)",
+                CalcMethod::Dubai => "دبي",
+                CalcMethod::MoonsightingCommittee => "لجنة رؤية الهلال",
+                CalcMethod::NorthAmerica => "أمريكا الشمالية (ISNA)",
+                CalcMethod::Kuwait => "الكويت",
+                CalcMethod::Qatar => "قطر",
+                CalcMethod::Singapore => "سنغافورة",
+                CalcMethod::Tehran => "طهران",
+                CalcMethod::Turkey => "تركيا (ديانت)",
+                CalcMethod::Other => "أخرى",
+            },
+        }
+    }
+
     pub fn to_salah(self) -> SalahMethod {
         match self {
             CalcMethod::MuslimWorldLeague => SalahMethod::MuslimWorldLeague,
@@ -105,6 +126,16 @@ impl MadhabPref {
         }
     }
 
+    pub fn label_localized(self, lang: Language) -> &'static str {
+        match lang {
+            Language::English => self.label(),
+            Language::Arabic => match self {
+                MadhabPref::Shafi => "شافعي",
+                MadhabPref::Hanafi => "حنفي",
+            },
+        }
+    }
+
     pub fn to_salah(self) -> SalahMadhab {
         match self {
             MadhabPref::Shafi => SalahMadhab::Shafi,
@@ -134,6 +165,16 @@ impl TimeFormat {
         match self {
             TimeFormat::Twelve => "12-hour",
             TimeFormat::TwentyFour => "24-hour",
+        }
+    }
+
+    pub fn label_localized(self, lang: Language) -> &'static str {
+        match lang {
+            Language::English => self.label(),
+            Language::Arabic => match self {
+                TimeFormat::Twelve => "١٢ ساعة",
+                TimeFormat::TwentyFour => "٢٤ ساعة",
+            },
         }
     }
 
@@ -230,16 +271,19 @@ impl Config {
     }
 }
 
-/// Look for a bundled/user-supplied adhan file in a couple of standard spots.
+/// Look for a user-supplied `adhan.<ext>` file in a couple of standard spots.
+/// Accepts any decoder-supported format so a downloaded FLAC/MP3/etc. can be
+/// dropped in without conversion.
 fn default_adhan_path() -> Option<PathBuf> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
+    const EXTS: [&str; 5] = ["ogg", "flac", "mp3", "wav", "m4a"];
 
+    let mut dirs: Vec<PathBuf> = Vec::new();
     if let Ok(home) = std::env::var("HOME") {
-        candidates.push(
-            PathBuf::from(&home).join(".local/share/cosmic-applet-prayer-times/adhan.ogg"),
-        );
+        dirs.push(PathBuf::from(&home).join(".local/share/cosmic-applet-prayer-times"));
     }
-    candidates.push(PathBuf::from("assets/adhan.ogg"));
+    dirs.push(PathBuf::from("assets"));
 
-    candidates.into_iter().find(|p| p.exists())
+    dirs.into_iter()
+        .flat_map(|dir| EXTS.iter().map(move |ext| dir.join(format!("adhan.{ext}"))))
+        .find(|p| p.exists())
 }
