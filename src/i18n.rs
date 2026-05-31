@@ -34,6 +34,7 @@ pub struct Strings {
     pub unavailable: &'static str,
     pub no_audio_file: &'static str,
     pub playing_label: &'static str,
+    pub connector_in: &'static str,
 }
 
 pub fn strings(lang: Language) -> Strings {
@@ -65,6 +66,7 @@ pub fn strings(lang: Language) -> Strings {
             unavailable: "Prayer times unavailable",
             no_audio_file: "No adhan file found",
             playing_label: "adhan",
+            connector_in: "in",
         },
         Language::Arabic => Strings {
             current_prayer: "الصلاة الحالية",
@@ -93,6 +95,7 @@ pub fn strings(lang: Language) -> Strings {
             unavailable: "تعذّر حساب أوقات الصلاة",
             no_audio_file: "لم يُعثر على ملف الأذان",
             playing_label: "أذان",
+            connector_in: "خلال",
         },
     }
 }

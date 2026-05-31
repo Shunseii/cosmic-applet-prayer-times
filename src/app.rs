@@ -129,8 +129,9 @@ impl PrayerApplet {
         };
         let status = schedule.status(self.now, lang);
         format!(
-            "{} {}",
+            "{} {} {}",
             status.next_label,
+            i18n::strings(lang).connector_in,
             prayer::format_countdown(status.countdown, lang)
         )
     }
@@ -632,7 +633,7 @@ fn prayer_row<'a>(
     state: RowState,
     gap: u16,
 ) -> Element<'a, Message> {
-    let accent = matches!(state, RowState::Current | RowState::Next);
+    let accent = matches!(state, RowState::Current);
     let name_el: Element<'a, Message> = if accent {
         text::body(name).class(cosmic::theme::Text::Accent).into()
     } else {
