@@ -124,6 +124,9 @@ impl PrayerApplet {
                 i18n::strings(lang).playing_label
             );
         }
+        if self.testing {
+            return i18n::strings(lang).playing_label.to_string();
+        }
         let Some(schedule) = self.schedule.as_ref() else {
             return "Prayer times".to_string();
         };
@@ -292,7 +295,8 @@ impl PrayerApplet {
             .and_then(|p| p.file_name())
             .map(|f| f.to_string_lossy().into_owned())
             .unwrap_or_else(|| s.default_file.to_string());
-        let choose = button::standard(s.choose).on_press(Message::PickAdhanFile);
+        let choose = button::icon(icon::from_name("folder-open-symbolic"))
+            .on_press(Message::PickAdhanFile);
         let file_control: Element<'_, Message> = if rtl {
             row![choose, text::body(adhan_name)].spacing(g).align_y(Alignment::Center).into()
         } else {
@@ -535,7 +539,20 @@ impl cosmic::Application for PrayerApplet {
             .on_press_down(Message::TogglePopup)
             .class(cosmic::theme::Button::AppletIcon);
 
-        cosmic::widget::autosize::autosize(btn, AUTOSIZE_ID.clone()).into()
+        // While the adhan is sounding (scheduled or a manual test), show a stop
+        // control in the panel so it can be cancelled without opening the popup.
+        let content: Element<'_, Self::Message> = if self.playing.is_some() || self.testing {
+            let stop = self
+                .core
+                .applet
+                .icon_button("media-playback-stop-symbolic")
+                .on_press(Message::StopAdhan);
+            row![btn, stop].align_y(Alignment::Center).into()
+        } else {
+            btn.into()
+        };
+
+        cosmic::widget::autosize::autosize(content, AUTOSIZE_ID.clone()).into()
     }
 
     fn view_window(&self, _id: Id) -> Element<'_, Self::Message> {
