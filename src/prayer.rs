@@ -165,10 +165,17 @@ impl Schedule {
         match next_idx {
             Some(i) => {
                 let current_index = if i == 0 { None } else { Some(i - 1) };
-                let current_label = match current_index {
-                    Some(c) => Slot::ALL[c].name_localized(lang).to_string(),
-                    // Before Fajr: the active period is last night's Isha.
-                    None => Slot::Isha.name_localized(lang).to_string(),
+                // After sunrise (before Dhuhr) the current period is sunrise, not Fajr.
+                let current_label = if current_index == Some(Slot::Fajr.index())
+                    && now >= self.sunrise
+                {
+                    i18n::strings(lang).sunrise.to_string()
+                } else {
+                    match current_index {
+                        Some(c) => Slot::ALL[c].name_localized(lang).to_string(),
+                        // Before Fajr: the active period is last night's Isha.
+                        None => Slot::Isha.name_localized(lang).to_string(),
+                    }
                 };
                 // Fajr's window ends at sunrise, not at the next prayer, so during
                 // Fajr the "next" event and countdown both target sunrise.
