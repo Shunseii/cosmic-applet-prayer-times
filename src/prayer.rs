@@ -170,20 +170,22 @@ impl Schedule {
                     // Before Fajr: the active period is last night's Isha.
                     None => Slot::Isha.name_localized(lang).to_string(),
                 };
-                // Fajr's window ends at sunrise, not at the next prayer, so its
-                // countdown targets sunrise.
-                let countdown = if current_index == Some(Slot::Fajr.index()) && now < self.sunrise {
-                    self.sunrise.signed_duration_since(now)
+                // Fajr's window ends at sunrise, not at the next prayer, so during
+                // Fajr the "next" event and countdown both target sunrise.
+                let fajr_before_sunrise =
+                    current_index == Some(Slot::Fajr.index()) && now < self.sunrise;
+                let (next_label, next_time) = if fajr_before_sunrise {
+                    (i18n::strings(lang).sunrise.to_string(), self.sunrise)
                 } else {
-                    self.times[i].signed_duration_since(now)
+                    (Slot::ALL[i].name_localized(lang).to_string(), self.times[i])
                 };
                 Status {
                     current_label,
                     current_index,
-                    next_label: Slot::ALL[i].name_localized(lang).to_string(),
+                    next_label,
                     next_index: Some(i),
-                    next_time: self.times[i],
-                    countdown,
+                    next_time,
+                    countdown: next_time.signed_duration_since(now),
                 }
             }
             // After Isha: next is tomorrow's Fajr; Isha is the active prayer.
