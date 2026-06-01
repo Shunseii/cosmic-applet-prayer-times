@@ -133,9 +133,9 @@ impl PrayerApplet {
         let status = schedule.status(self.now, lang);
         format!(
             "{} {} {}",
-            status.next_label,
-            i18n::strings(lang).connector_in,
-            prayer::format_countdown(status.countdown, lang)
+            status.current_label,
+            prayer::format_countdown(status.countdown, lang),
+            i18n::strings(lang).left
         )
     }
 
@@ -200,6 +200,16 @@ impl PrayerApplet {
                 state,
                 spacing.space_xs,
             ));
+            // Sunrise (informational) sits between Fajr and Dhuhr.
+            if slot == Slot::Fajr {
+                let sr_state = if schedule.sunrise_passed(self.now) {
+                    RowState::Passed
+                } else {
+                    RowState::Upcoming
+                };
+                let sr_time = i18n::localize_time(&schedule.sunrise_string(pattern), lang);
+                list = list.push(prayer_row(rtl, s.sunrise, &sr_time, sr_state, spacing.space_xs));
+            }
         }
 
         let gear = button::icon(icon::from_name("emblem-system-symbolic"))

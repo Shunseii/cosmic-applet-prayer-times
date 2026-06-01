@@ -97,6 +97,7 @@ pub enum RowState {
 pub struct Schedule {
     date: NaiveDate,
     times: [DateTime<Utc>; 5],
+    sunrise: DateTime<Utc>,
     fajr_tomorrow: DateTime<Utc>,
 }
 
@@ -127,6 +128,7 @@ impl Schedule {
         Ok(Self {
             date,
             times: resolved,
+            sunrise: times.time(Prayer::Sunrise),
             fajr_tomorrow: times.time(Prayer::FajrTomorrow),
         })
     }
@@ -144,6 +146,15 @@ impl Schedule {
 
     fn local_time_string_for(time: DateTime<Utc>, pattern: &str) -> String {
         time.with_timezone(&Local).format(pattern).to_string()
+    }
+
+    /// Sunrise (informational; marks the end of the Fajr window).
+    pub fn sunrise_string(&self, pattern: &str) -> String {
+        Self::local_time_string_for(self.sunrise, pattern)
+    }
+
+    pub fn sunrise_passed(&self, now: DateTime<Utc>) -> bool {
+        self.sunrise <= now
     }
 
     /// Determine current/next prayer and the countdown to next, relative to `now`.
