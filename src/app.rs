@@ -554,18 +554,32 @@ impl cosmic::Application for PrayerApplet {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
+        let applet = &self.core.applet;
+        let suggested = applet.suggested_size(true);
+        let (pad_major, pad_minor) = applet.suggested_padding(true);
+        let (h_pad, v_pad) = if applet.is_horizontal() {
+            (pad_major, pad_minor)
+        } else {
+            (pad_minor, pad_major)
+        };
+
+        // Fill the panel's thickness so the whole panel height is clickable
+        // (reachable at the screen edge), matching the built-in applets.
         let label = self.panel_label();
-        let btn = button::custom(self.core.applet.text(label))
-            .padding([0, self.core.applet.suggested_padding(true).0])
+        let mut btn = button::custom(container(applet.text(label)).center_y(Length::Fill))
+            .padding([0, h_pad])
             .on_press_down(Message::TogglePopup)
             .class(cosmic::theme::Button::AppletIcon);
+        btn = if applet.is_horizontal() {
+            btn.height(Length::Fixed(f32::from(suggested.1 + 2 * v_pad)))
+        } else {
+            btn.width(Length::Fixed(f32::from(suggested.0 + 2 * h_pad)))
+        };
 
         // While the adhan is sounding (scheduled or a manual test), show a stop
         // control in the panel so it can be cancelled without opening the popup.
         let content: Element<'_, Self::Message> = if self.playing.is_some() || self.testing {
-            let stop = self
-                .core
-                .applet
+            let stop = applet
                 .icon_button("media-playback-stop-symbolic")
                 .on_press(Message::StopAdhan);
             row![btn, stop].align_y(Alignment::Center).into()
