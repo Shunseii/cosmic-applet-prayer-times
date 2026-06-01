@@ -34,6 +34,7 @@ pub struct Strings {
     pub no_audio_file: &'static str,
     pub playing_label: &'static str,
     pub left: &'static str,
+    pub connector_in: &'static str,
     pub sunrise: &'static str,
 }
 
@@ -66,6 +67,7 @@ pub fn strings(lang: Language) -> Strings {
             no_audio_file: "No adhan file found",
             playing_label: "adhan",
             left: "left",
+            connector_in: "in",
             sunrise: "Sunrise",
         },
         Language::Arabic => Strings {
@@ -95,6 +97,7 @@ pub fn strings(lang: Language) -> Strings {
             no_audio_file: "لم يُعثر على ملف الأذان",
             playing_label: "أذان",
             left: "متبقّي",
+            connector_in: "خلال",
             sunrise: "الشروق",
         },
     }

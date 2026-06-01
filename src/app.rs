@@ -131,12 +131,15 @@ impl PrayerApplet {
             return "Prayer times".to_string();
         };
         let status = schedule.status(self.now, lang);
-        format!(
-            "{} {} {}",
-            status.current_label,
-            prayer::format_countdown(status.countdown, lang),
-            i18n::strings(lang).left
-        )
+        let s = i18n::strings(lang);
+        let countdown = prayer::format_countdown(status.countdown, lang);
+        // After sunrise the Fajr window has ended, so there's no current prayer —
+        // show the next one ("Dhuhr in Xh XXm") instead of "Fajr ... left".
+        if status.current_index == Some(Slot::Fajr.index()) && schedule.sunrise_passed(self.now) {
+            format!("{} {} {}", status.next_label, s.connector_in, countdown)
+        } else {
+            format!("{} {} {}", status.current_label, countdown, s.left)
+        }
     }
 
     fn main_view(&self) -> Element<'_, Message> {
