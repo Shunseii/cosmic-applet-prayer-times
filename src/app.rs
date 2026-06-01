@@ -192,9 +192,16 @@ impl PrayerApplet {
             .width(Length::Fill)
             .class(cosmic::theme::Container::Card);
 
+        // After sunrise (and before Dhuhr) the Fajr window has ended, so sunrise
+        // is the "current" period instead of Fajr.
+        let in_sunrise_window = status.current_index == Some(Slot::Fajr.index())
+            && schedule.sunrise_passed(self.now);
         let mut list = column![].spacing(spacing.space_xxs);
         for slot in Slot::ALL {
-            let state = schedule.row_state(slot, &status, self.now);
+            let mut state = schedule.row_state(slot, &status, self.now);
+            if slot == Slot::Fajr && in_sunrise_window {
+                state = RowState::Passed;
+            }
             let time_str = i18n::localize_time(&schedule.local_time_string(slot, pattern), lang);
             list = list.push(prayer_row(
                 rtl,
@@ -203,9 +210,12 @@ impl PrayerApplet {
                 state,
                 spacing.space_xs,
             ));
-            // Sunrise (informational) sits between Fajr and Dhuhr.
+            // Sunrise (informational) sits between Fajr and Dhuhr, and is
+            // highlighted as current during the sunrise-to-Dhuhr window.
             if slot == Slot::Fajr {
-                let sr_state = if schedule.sunrise_passed(self.now) {
+                let sr_state = if in_sunrise_window {
+                    RowState::Current
+                } else if schedule.sunrise_passed(self.now) {
                     RowState::Passed
                 } else {
                     RowState::Upcoming
