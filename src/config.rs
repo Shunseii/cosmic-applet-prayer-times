@@ -260,6 +260,26 @@ impl Default for Config {
     }
 }
 
+/// Cross-instance adhan playback state, shared via a separate `cosmic-config`
+/// entry (one per-monitor applet process, all watching the same key). Keeps the
+/// monitors in sync: a single process owns audio output and any process can
+/// stop it. This is ephemeral runtime state, deliberately kept out of `Config`.
+#[derive(Debug, Clone, PartialEq, Default, CosmicConfigEntry)]
+#[version = 1]
+pub struct PlaybackState {
+    /// The adhan currently sounding, or `None` when nothing is playing.
+    pub active: Option<ActiveAdhan>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveAdhan {
+    /// Prayer slot index, 0..5 (Fajr..Isha).
+    pub slot: u8,
+    /// PID of the applet process driving audio output for this adhan. Only that
+    /// process plays the sound; the others just mirror the "playing" UI.
+    pub owner: u32,
+}
+
 impl Config {
     pub fn time_format_pattern(&self) -> &'static str {
         self.time_format.pattern()

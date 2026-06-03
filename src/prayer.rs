@@ -58,6 +58,10 @@ impl Slot {
         }
     }
 
+    pub fn from_index(i: usize) -> Self {
+        Self::ALL.get(i).copied().unwrap_or(Slot::Fajr)
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Slot::Fajr => "Fajr",
