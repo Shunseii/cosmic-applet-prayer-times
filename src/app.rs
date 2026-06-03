@@ -16,7 +16,9 @@ use cosmic::{theme, Element};
 use salah::prelude::{DateTime, Duration, Utc};
 
 use crate::audio::AudioHandle;
-use crate::config::{CalcMethod, Config, Language, MadhabPref, TimeFormat};
+use crate::config::{
+    ActiveAdhan, CalcMethod, Config, Language, MadhabPref, PlaybackState, TimeFormat,
+};
 use crate::i18n;
 use crate::prayer::{self, RowState, Schedule, Slot};
 
@@ -24,6 +26,9 @@ static AUTOSIZE_ID: LazyLock<cosmic::widget::Id> =
     LazyLock::new(|| cosmic::widget::Id::new("ppt-panel-autosize"));
 
 const SNOOZE: Duration = Duration::minutes(5);
+
+/// `cosmic-config` id for the shared, cross-instance adhan playback state.
+const PLAYBACK_ID: &str = "io.github.shunseii.CosmicAppletPrayerTimes.State";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -37,6 +42,14 @@ pub struct PrayerApplet {
     page: Page,
     config: Config,
     config_handle: Option<cosmic_config::Config>,
+    /// Shared, cross-instance adhan playback state and its backing handle.
+    playback: PlaybackState,
+    playback_handle: Option<cosmic_config::Config>,
+    /// This process's PID, used to claim ownership of audio output.
+    owner: u32,
+    /// The slot this process actually started audio for, so we don't restart it
+    /// on every playback-state update. `None` when this process isn't the owner.
+    audio_started_for: Option<u8>,
     audio: AudioHandle,
     schedule: Option<Schedule>,
     now: DateTime<Utc>,
@@ -74,6 +87,12 @@ pub enum Message {
     SetLanguage(usize),
     PickAdhanFile,
     AdhanFilePicked(Option<PathBuf>),
+    /// The shared `Config` changed on disk (e.g. settings edited on another
+    /// monitor's applet instance).
+    ConfigUpdated(Config),
+    /// The shared adhan playback state changed (another instance started or
+    /// stopped the adhan).
+    PlaybackUpdated(PlaybackState),
 }
 
 impl PrayerApplet {
@@ -105,12 +124,62 @@ impl PrayerApplet {
         }
     }
 
+    fn persist_playback(&self) {
+        if let Some(handle) = &self.playback_handle {
+            if let Err(err) = self.playback.write_entry(handle) {
+                tracing::error!(?err, "failed to persist playback state");
+            }
+        }
+    }
+
+    /// Claim ownership and announce a new adhan to all instances. The audio is
+    /// not started here; `apply_playback` does that once the shared state is
+    /// reconciled, so exactly one process (the last writer) ends up the owner.
     fn start_play(&mut self, slot: Slot) {
-        self.playing = Some(slot);
-        if let Some(path) = self.config.resolved_adhan_path() {
-            self.audio.play(path, self.config.volume);
-        } else {
-            tracing::info!(prayer = slot.name(), "adhan time (no audio file configured)");
+        self.playback.active = Some(ActiveAdhan {
+            slot: slot.index() as u8,
+            owner: self.owner,
+        });
+        self.persist_playback();
+        self.apply_playback();
+    }
+
+    /// Clear the shared playback state and stop audio everywhere.
+    fn stop_play(&mut self) {
+        self.playback.active = None;
+        self.persist_playback();
+        self.apply_playback();
+    }
+
+    /// Reconcile local audio + UI with the shared playback state. Called both
+    /// after a local change and when another instance updates the state.
+    fn apply_playback(&mut self) {
+        match self.playback.active {
+            Some(ActiveAdhan { slot, owner }) => {
+                self.playing = Some(Slot::from_index(slot as usize));
+                if owner == self.owner {
+                    // We own this adhan: start audio once.
+                    if self.audio_started_for != Some(slot) {
+                        if let Some(path) = self.config.resolved_adhan_path() {
+                            self.audio.play(path, self.config.volume);
+                        } else {
+                            tracing::info!(slot, "adhan time (no audio file configured)");
+                        }
+                        self.audio_started_for = Some(slot);
+                    }
+                } else if self.audio_started_for.is_some() {
+                    // Lost ownership (another instance won the claim): go quiet.
+                    self.audio.stop();
+                    self.audio_started_for = None;
+                }
+            }
+            None => {
+                self.playing = None;
+                if self.audio_started_for.is_some() {
+                    self.audio.stop();
+                    self.audio_started_for = None;
+                }
+            }
         }
     }
 
@@ -369,6 +438,13 @@ impl cosmic::Application for PrayerApplet {
             .map(|h| Config::get_entry(h).unwrap_or_else(|(_errs, c)| c))
             .unwrap_or_default();
 
+        let playback_handle =
+            cosmic_config::Config::new(PLAYBACK_ID, PlaybackState::VERSION).ok();
+        let playback = playback_handle
+            .as_ref()
+            .map(|h| PlaybackState::get_entry(h).unwrap_or_else(|(_errs, p)| p))
+            .unwrap_or_default();
+
         let now = prayer::now_utc();
         let mut app = PrayerApplet {
             core,
@@ -378,6 +454,10 @@ impl cosmic::Application for PrayerApplet {
             lon_text: format!("{}", config.longitude),
             config,
             config_handle,
+            playback,
+            playback_handle,
+            owner: std::process::id(),
+            audio_started_for: None,
             audio: AudioHandle::spawn(),
             schedule: None,
             now,
@@ -387,6 +467,7 @@ impl cosmic::Application for PrayerApplet {
             testing: false,
         };
         app.recompute();
+        app.apply_playback();
         (app, Task::none())
     }
 
@@ -395,7 +476,25 @@ impl cosmic::Application for PrayerApplet {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        cosmic::iced::time::every(StdDuration::from_secs(1)).map(|_| Message::Tick)
+        let tick = cosmic::iced::time::every(StdDuration::from_secs(1)).map(|_| Message::Tick);
+
+        // Watch the shared config + playback state so changes made by another
+        // monitor's applet instance propagate here.
+        let config = cosmic_config::config_subscription::<_, Config>(
+            "config",
+            Self::APP_ID.into(),
+            Config::VERSION,
+        )
+        .map(|update| Message::ConfigUpdated(update.config));
+
+        let playback = cosmic_config::config_subscription::<_, PlaybackState>(
+            "playback",
+            PLAYBACK_ID.into(),
+            PlaybackState::VERSION,
+        )
+        .map(|update| Message::PlaybackUpdated(update.config));
+
+        Subscription::batch([tick, config, playback])
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
@@ -433,14 +532,15 @@ impl cosmic::Application for PrayerApplet {
                 self.last_tick = self.now;
             }
             Message::StopAdhan => {
-                self.playing = None;
-                self.snooze = None;
                 self.testing = false;
+                self.snooze = None;
                 self.audio.stop();
+                self.stop_play();
             }
             Message::Snooze => {
-                self.audio.stop();
-                if let Some(slot) = self.playing.take() {
+                let slot = self.playing;
+                self.stop_play();
+                if let Some(slot) = slot {
                     self.snooze = Some((self.now + SNOOZE, slot));
                 }
             }
@@ -517,6 +617,21 @@ impl cosmic::Application for PrayerApplet {
                 if let Some(path) = path {
                     self.config.adhan_path = Some(path);
                     self.persist();
+                }
+            }
+            Message::ConfigUpdated(config) => {
+                if config != self.config {
+                    self.config = config;
+                    self.lat_text = format!("{}", self.config.latitude);
+                    self.lon_text = format!("{}", self.config.longitude);
+                    self.audio.set_volume(self.config.volume);
+                    self.recompute();
+                }
+            }
+            Message::PlaybackUpdated(playback) => {
+                if playback != self.playback {
+                    self.playback = playback;
+                    self.apply_playback();
                 }
             }
             Message::TogglePopup => {
