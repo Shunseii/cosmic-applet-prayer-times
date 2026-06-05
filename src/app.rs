@@ -136,6 +136,13 @@ impl PrayerApplet {
     /// not started here; `apply_playback` does that once the shared state is
     /// reconciled, so exactly one process (the last writer) ends up the owner.
     fn start_play(&mut self, slot: Slot) {
+        if self.config.resolved_adhan_path().is_none() {
+            tracing::info!(
+                slot = slot.index(),
+                "adhan time, but no audio file configured; not entering playing state"
+            );
+            return;
+        }
         self.playback.active = Some(ActiveAdhan {
             slot: slot.index() as u8,
             owner: self.owner,
@@ -501,6 +508,14 @@ impl cosmic::Application for PrayerApplet {
         match message {
             Message::Tick => {
                 self.now = prayer::now_utc();
+
+                // Adhan finished on its own: reset the stop-button/playing state.
+                if self.audio.take_finished() {
+                    self.testing = false;
+                    if self.playing.is_some() {
+                        self.stop_play();
+                    }
+                }
 
                 let rolled = self
                     .schedule
